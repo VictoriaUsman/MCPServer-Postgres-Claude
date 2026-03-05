@@ -1,0 +1,19 @@
+name: Health Check after Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  health-check:
+    name: Verify deployment is live
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Railway to deploy
+        run: sleep 120
+
+      - name: Check health endpoint
+        run: |
+          RESPONSE=$(curl -sf https://mcpserver-postgres-production.up.railway.app/health)
+          echo "Response: $RESPONSE"
+          echo "$RESPONSE" | grep -q '"status":"ok"' && echo "Health check passed" || (echo "Health check FAILED" && exit 1)

@@ -1,16 +1,16 @@
-# PostgreSQL MCP Server for Claude Desktop
+# PostgreSQL MCP Server
 
-Connect Claude Desktop to your PostgreSQL database and query it using plain English.
+Connect Claude to your PostgreSQL database and query it using plain English — via Claude.ai in the browser or Claude Desktop.
 
 ---
 
 ## How It Works
 
 ```
-Claude Desktop → MCP Server (Railway) → PostgreSQL (Railway)
+Claude (browser or desktop) → MCP Server (Railway) → PostgreSQL (Railway)
 ```
 
-The MCP server runs on Railway and is accessed over HTTPS. Anyone with the URL and auth token can connect — no local setup required beyond Claude Desktop.
+The MCP server runs on Railway and is accessed over HTTPS. Anyone with the secret URL can connect — no local setup required beyond Claude.
 
 ---
 
@@ -18,28 +18,43 @@ The MCP server runs on Railway and is accessed over HTTPS. Anyone with the URL a
 
 ### 1. Push this repo to GitHub
 
-### 2. Create a new Railway service
+### 2. Add as a new service in your existing Railway project
 
-- Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub repo
+- Open your Railway project → **New Service** → **GitHub Repo**
 - Select this repository
+- Under **Settings → Root Directory**, set it to `/my-mcp-server`
 
-### 3. Set environment variables in Railway
+### 3. Set environment variables
 
-In your Railway service → **Variables** tab, add:
+In the service **Variables** tab, add:
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | Your PostgreSQL internal URL (e.g. `postgresql://postgres:PASSWORD@postgres.railway.internal:5432/railway`) |
-| `AUTH_TOKEN` | A strong secret token (generate one with `openssl rand -hex 32`) |
+| `DATABASE_URL` | `postgresql://postgres:PASSWORD@postgres.railway.internal:5432/railway` |
+| `AUTH_TOKEN` | A strong secret (generate: `node -e "require('crypto').randomBytes(32).toString('hex').replace(/^/, s => console.log(s))"`) |
 
-> Use the **internal** Railway URL for DATABASE_URL — both services are on the same private network.
+> Use the **internal** Railway URL for `DATABASE_URL` — both services share Railway's private network, so no public proxy needed.
 
-### 4. Get your deployment URL
+### 4. Get your public URL
 
-Once deployed, Railway gives you a public URL like:
+Railway → your service → **Settings → Networking → Generate Domain**
+
+Your MCP URL will be:
 ```
-https://my-mcp-server-production.up.railway.app
+https://YOUR-APP.up.railway.app/mcp/YOUR_AUTH_TOKEN
 ```
+
+---
+
+## Connect Claude.ai (Browser)
+
+1. Go to [claude.ai](https://claude.ai) → profile → **Settings**
+2. Click **Customize** → **Add custom connector**
+3. Fill in:
+   - **Name:** `postgres`
+   - **URL:** `https://YOUR-APP.up.railway.app/mcp/YOUR_AUTH_TOKEN`
+4. Leave OAuth fields empty
+5. Save — the hammer icon (🔨) will appear in new chats
 
 ---
 
@@ -47,7 +62,7 @@ https://my-mcp-server-production.up.railway.app
 
 Open your Claude Desktop config file:
 
-**Windows:**
+**Windows (Store app):**
 ```
 C:\Users\YOUR_USERNAME\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json
 ```
@@ -57,28 +72,27 @@ C:\Users\YOUR_USERNAME\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Ro
 ~/Library/Application Support/Claude/claude_desktop_config.json
 ```
 
-Add the `mcpServers` block:
+Merge this into the file:
 
 ```json
 {
   "mcpServers": {
     "postgres": {
-      "url": "https://YOUR-APP.up.railway.app/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_AUTH_TOKEN"
-      }
+      "type": "sse",
+      "url": "https://YOUR-APP.up.railway.app/mcp/YOUR_AUTH_TOKEN",
+      "headers": {}
     }
   }
 }
 ```
 
-Fully quit Claude Desktop and reopen it. Look for the **hammer icon (🔨)** in the chat input — that confirms it's connected.
+Fully quit Claude Desktop and reopen it.
 
 ---
 
 ## Usage
 
-Ask Claude naturally:
+Ask Claude naturally in any chat:
 
 - *"List all tables in my database"*
 - *"Describe the users table"*
@@ -92,20 +106,21 @@ Ask Claude naturally:
 | Tool | Description |
 |------|-------------|
 | `list_tables` | Lists all tables in the database |
-| `describe_table` | Shows columns and types for a table |
+| `describe_table` | Shows columns and data types for a table |
 | `query` | Runs a SQL query and returns results |
 
 ---
 
 ## Security
 
-- All requests require a Bearer token (`AUTH_TOKEN`)
-- Destructive operations blocked: `DROP`, `TRUNCATE`, `ALTER`, `CREATE`, `GRANT`, `REVOKE`, `COPY`
+- Access is protected via a secret token embedded in the URL
+- Destructive operations are blocked: `DROP`, `TRUNCATE`, `ALTER`, `CREATE`, `GRANT`, `REVOKE`, `COPY`
 - `DELETE` without a `WHERE` clause is blocked
 - Queries auto-cancelled after 10 seconds
-- Error messages sanitised — internal details never exposed
+- Error messages are sanitised — internal details never exposed
 - Max 5 concurrent database connections
 - HTTPS enforced via Railway
+- `.env` is gitignored — secrets never committed to source control
 
 ---
 
@@ -114,21 +129,21 @@ Ask Claude naturally:
 | Variable | Required | Description |
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `AUTH_TOKEN` | Yes | Secret token for API authentication |
+| `AUTH_TOKEN` | Yes | Secret token — also used as the URL path |
 | `PORT` | No | HTTP port (Railway sets this automatically) |
 
 ---
 
 ## Troubleshooting
 
+**"Error connecting to MCP server" on Claude.ai**
+→ Make sure the full URL includes the token: `.../mcp/YOUR_AUTH_TOKEN`
+
 **Hammer icon not showing in Claude Desktop**
-→ Fully quit (not just close) Claude Desktop and reopen it.
-
-**401 Unauthorized**
-→ Check that the `AUTH_TOKEN` in your config matches the one set in Railway variables.
-
-**Connection refused / timeout**
-→ Check that the Railway service is running and the URL is correct.
+→ Fully quit (not just close) and reopen Claude Desktop.
 
 **DB connection error on Railway**
-→ Make sure `DATABASE_URL` uses the internal Railway hostname (`postgres.railway.internal`), not the public proxy URL.
+→ Use the internal hostname (`postgres.railway.internal`), not the public proxy URL.
+
+**Build failed on Railway**
+→ Make sure Root Directory is set to `/my-mcp-server` in service Settings.
