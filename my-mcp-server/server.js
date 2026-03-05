@@ -144,6 +144,14 @@ function createMcpServer() {
 // ── Express app ───────────────────────────────────────────────────────────────
 const app = express();
 
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
 // Health check — public
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
