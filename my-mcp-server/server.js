@@ -1,21 +1,20 @@
 const express = require("express");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
-const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
+const { SSEServerTransport } = require("@modelcontextprotocol/sdk/server/sse.js");
 const { Pool } = require("pg");
 const { z } = require("zod");
-const { randomUUID } = require("node:crypto");
 
 // ── Validate required environment variables ──────────────────────────────────
 if (!process.env.DATABASE_URL) {
-  console.error("ERROR: DATABASE_URL environment variable is not set.");
+  console.error("ERROR: DATABASE_URL is not set.");
+  process.exit(1);
+}
+if (!process.env.AUTH_TOKEN) {
+  console.error("ERROR: AUTH_TOKEN is not set.");
   process.exit(1);
 }
 
-const AUTH_TOKEN = process.env.AUTH_TOKEN;
-if (!AUTH_TOKEN) {
-  console.error("ERROR: AUTH_TOKEN environment variable is not set.");
-  process.exit(1);
-}
+const SECRET_PATH = process.env.AUTH_TOKEN; // token doubles as secret URL path
 
 // ── Blocked SQL patterns ──────────────────────────────────────────────────────
 const BLOCKED_PATTERNS = [
@@ -58,7 +57,7 @@ function safeError(err) {
   return out;
 }
 
-// ── MCP server factory (one per HTTP session) ─────────────────────────────────
+// ── MCP server factory ────────────────────────────────────────────────────────
 function createMcpServer() {
   const server = new McpServer({ name: "postgres-mcp-server", version: "1.0.0" });
 
@@ -144,48 +143,26 @@ function createMcpServer() {
 
 // ── Express app ───────────────────────────────────────────────────────────────
 const app = express();
-app.use(express.json());
 
-// Auth middleware
-function requireAuth(req, res, next) {
-  const auth = req.headers.authorization;
-  if (!auth || auth !== `Bearer ${AUTH_TOKEN}`) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
-}
-
-// Health check (no auth — used by Railway)
+// Health check — public
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
-// MCP endpoint
+// MCP over SSE — protected via secret path
 const sessions = new Map();
 
-app.all("/mcp", requireAuth, async (req, res) => {
-  try {
-    const sessionId = req.headers["mcp-session-id"];
+app.get(`/mcp/${SECRET_PATH}`, async (req, res) => {
+  const server = createMcpServer();
+  const transport = new SSEServerTransport(`/mcp/${SECRET_PATH}/messages`, res);
+  sessions.set(transport.sessionId, transport);
+  transport.onclose = () => sessions.delete(transport.sessionId);
+  await server.connect(transport);
+});
 
-    if (req.method === "POST" && !sessionId) {
-      // New session
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => sessions.set(id, transport),
-      });
-      transport.onclose = () => {
-        if (transport.sessionId) sessions.delete(transport.sessionId);
-      };
-      const server = createMcpServer();
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-    } else if (sessionId && sessions.has(sessionId)) {
-      await sessions.get(sessionId).handleRequest(req, res, req.body);
-    } else {
-      res.status(404).json({ error: "Session not found" });
-    }
-  } catch (err) {
-    console.error("MCP request error:", err.message);
-    if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
-  }
+app.post(`/mcp/${SECRET_PATH}/messages`, async (req, res) => {
+  const sessionId = req.query.sessionId;
+  const transport = sessions.get(sessionId);
+  if (!transport) return res.status(404).json({ error: "Session not found" });
+  await transport.handlePostMessage(req, res);
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
