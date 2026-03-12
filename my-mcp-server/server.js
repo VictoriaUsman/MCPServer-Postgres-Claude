@@ -138,6 +138,46 @@ function createMcpServer() {
     }
   );
 
+  server.tool(
+    "refresh_bi_consolidated_data",
+    "Remove orphaned rows from bi_consolidated_data (reservations no longer in the reservations table) and reset data_snapshot_date to NOW() for all remaining rows. Runs both operations in a single transaction.",
+    {},
+    async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const deleted = await client.query(
+          `DELETE FROM bi_consolidated_data
+           WHERE reservation_id NOT IN (SELECT id FROM reservations)`
+        );
+        const updated = await client.query(
+          `UPDATE bi_consolidated_data SET data_snapshot_date = NOW()`
+        );
+        await client.query("COMMIT");
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                orphaned_rows_deleted: deleted.rowCount,
+                rows_updated: updated.rowCount,
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (err) {
+        await client.query("ROLLBACK");
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: safeError(err) }, null, 2) }],
+          isError: true,
+        };
+      } finally {
+        client.release();
+      }
+    }
+  );
+
   return server;
 }
 

@@ -147,3 +147,5 @@ Ask Claude naturally in any chat:
 
 **Build failed on Railway**
 → Make sure Root Directory is set to `/my-mcp-server` in service Settings.
+
+By: Ian Tristan Cultura
